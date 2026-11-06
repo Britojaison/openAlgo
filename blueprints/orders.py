@@ -565,6 +565,26 @@ def close_position():
         if not auth_token or not broker_name:
             return jsonify({"status": "error", "message": "Authentication error"}), 401
 
+        # Cancel any resting/pending orders for this symbol first so broker quantity is not locked
+        try:
+            from services.orderbook_service import get_orderbook_with_auth
+            from services.cancel_order_service import cancel_order_with_auth
+            import time
+
+            ok, ob_data, _ = get_orderbook_with_auth(auth_token, broker_name)
+            if ok and isinstance(ob_data, dict):
+                orders_list = ob_data.get("data", [])
+                for ord_item in orders_list:
+                    ord_sym = ord_item.get("symbol")
+                    ord_status = str(ord_item.get("order_status", "")).lower()
+                    ord_id = ord_item.get("orderid")
+                    if ord_sym == symbol and ord_status in ("open", "pending", "trigger pending", "trigger_pending"):
+                        logger.info(f"Cancelling resting order {ord_id} on {symbol} before position close")
+                        cancel_order_with_auth(str(ord_id), auth_token, broker_name, {"orderid": str(ord_id)})
+                time.sleep(0.3)
+        except Exception as err:
+            logger.warning(f"Failed to cancel resting orders before close_position: {err}")
+
         # Dynamically import broker-specific modules for API
         api_funcs = dynamic_import(
             broker_name, "api.order_api", ["place_smartorder_api", "get_open_position"]
@@ -628,17 +648,23 @@ def close_position():
                     api_key=api_key,
                 ))
         else:
-            # No orderid, definite error
-            response_data = {
-                "status": "error",
-                "message": response.get("message")
-                if response and "message" in response
-                else "Failed to close position (broker did not return order ID).",
-            }
-            if res and hasattr(res, "status") and isinstance(res.status, int) and res.status >= 400:
-                status_code = res.status  # Use broker's HTTP error code if available
+            # Check if it was because position was already closed / 0
+            msg = str(response.get("message", "")) if response else ""
+            if "no openposition found" in msg.lower() or "no action needed" in msg.lower():
+                response_data = {
+                    "status": "success",
+                    "message": "Position is already flat (0 quantity).",
+                }
+                status_code = 200
             else:
-                status_code = 400  # Default to Bad Request
+                response_data = {
+                    "status": "error",
+                    "message": msg or "Failed to close position (broker did not return order ID).",
+                }
+                if res and hasattr(res, "status") and isinstance(res.status, int) and res.status >= 400:
+                    status_code = res.status  # Use broker's HTTP error code if available
+                else:
+                    status_code = 400  # Default to Bad Request
 
         return jsonify(response_data), status_code
 
