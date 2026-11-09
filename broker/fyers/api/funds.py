@@ -107,18 +107,17 @@ def get_margin_data(auth_token: str) -> dict[str, str]:
 
         # Calculate totals with proper error handling
         try:
-            # "availablecash" must be the actual settled cash balance, not
-            # total trading capacity. Fyers' "Available Balance" is the final
-            # ledger line (Clear Balance + Collaterals + Fund Transfer +
-            # Receivables + Adhoc Limit, per the fund_limit ledger order),
-            # so it folds collateral back in -- double-counting against the
-            # separately reported "collateral" field below, same class of
-            # bug as GitHub issue #1582. "Clear Balance" is the settled,
-            # collateral-free cash figure, so use that instead.
+            # "clear_balance" is the settled, collateral-free cash figure
             balance = processed_funds.get("clear_balance", {})
             balance_equity = float(balance.get("equity_amount", 0))
             balance_commodity = float(balance.get("commodity_amount", 0))
-            total_balance = balance_equity + balance_commodity
+            total_clear_balance = balance_equity + balance_commodity
+
+            # Total trading capacity / available balance (includes intraday realized P&L)
+            avail = processed_funds.get("available_balance", {}) or processed_funds.get("total_balance", {})
+            avail_equity = float(avail.get("equity_amount", 0))
+            avail_commodity = float(avail.get("commodity_amount", 0))
+            total_avail_margin = avail_equity + avail_commodity
 
             # Get collateral
             collateral = processed_funds.get("collaterals", {})
@@ -157,9 +156,19 @@ def get_margin_data(auth_token: str) -> dict[str, str]:
 
             total_realised, total_unrealised = sum_realised_unrealised(position_book)
 
+            # Live Trading Balance (Total live capital available to trade today)
+            # If Fyers available_balance is reported, use that; otherwise clear_balance + realized P&L
+            live_trading_balance = total_avail_margin if total_avail_margin > 0 else (total_clear_balance + total_realised)
+
+            # Unsettled profit (e.g. Friday intraday profit pending clearing)
+            unsettled_amount = max(0.0, round(live_trading_balance - total_clear_balance - total_collateral, 2))
+
             # Format and return the response
             result = {
-                "availablecash": f"{total_balance:.2f}",
+                "availablecash": f"{live_trading_balance:.2f}",
+                "tradingbalance": f"{live_trading_balance:.2f}",
+                "clearbalance": f"{total_clear_balance:.2f}",
+                "unsettledamount": f"{unsettled_amount:.2f}",
                 "collateral": f"{total_collateral:.2f}",
                 "m2munrealized": f"{total_unrealised:.2f}",
                 "m2mrealized": f"{total_realised:.2f}",

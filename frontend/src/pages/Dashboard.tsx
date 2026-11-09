@@ -1,6 +1,7 @@
 import { BarChart3, BookOpen, FileText, GraduationCap, Search, Zap } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
+import { BalanceHistorySection } from '@/components/dashboard/BalanceHistorySection'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
@@ -9,6 +10,9 @@ import { onModeChange } from '@/stores/themeStore'
 
 interface MarginData {
   availablecash: string
+  tradingbalance?: string
+  clearbalance?: string
+  unsettledamount?: string
   collateral: string
   m2munrealized: string
   m2mrealized: string
@@ -338,12 +342,19 @@ export default function Dashboard() {
                 {isLoading
                   ? '...'
                   : marginData
-                    ? formatIndianNumber(marginData.availablecash)
+                    ? formatIndianNumber(marginData.tradingbalance || marginData.availablecash)
                     : '0.00'}
               </p>
-              <Badge variant="secondary" className="mt-2">
-                Cash Balance
-              </Badge>
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <Badge variant="secondary">
+                  Cash Balance
+                </Badge>
+                {marginData?.unsettledamount && parseFloat(marginData.unsettledamount) > 0 ? (
+                  <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/40">
+                    Pending T+1: ₹{formatIndianNumber(marginData.unsettledamount)}
+                  </Badge>
+                ) : null}
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -452,6 +463,9 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       )}
+
+      {/* Account Cash Balance & Capital History (Chart + Ledger Table) */}
+      <BalanceHistorySection />
 
       {/* Quick Access Tools */}
       <div>

@@ -1251,10 +1251,46 @@ def get_dashboard_data():
             logger.error(f"Failed to get margin data for user {login_username}")
             return jsonify({"status": "error", "message": "Failed to get margin data"}), 500
 
+        # Record daily balance snapshot for historical ledger & charting
+        try:
+            from database.balance_history_db import record_balance_snapshot
+            record_balance_snapshot(login_username, broker, margin_data, snapshot_type="LIVE")
+        except Exception as snap_err:
+            logger.warning(f"Could not record balance snapshot: {snap_err}")
+
         return jsonify({"status": "success", "data": margin_data})
 
     except Exception as e:
         logger.exception(f"Error fetching dashboard data: {e}")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@auth_bp.route("/balance-history", methods=["GET"])
+@check_session_validity
+def get_account_balance_history():
+    """Return historical daily balance and ledger records for the logged-in user."""
+    if "user" not in session:
+        return jsonify({"status": "error", "message": "Not authenticated"}), 401
+
+    login_username = session["user"]
+    broker = session.get("broker")
+    from_date = request.args.get("from_date")
+    to_date = request.args.get("to_date")
+    days_param = request.args.get("days", "all")
+    days = None if days_param == "all" else (int(days_param) if days_param.isdigit() else None)
+
+    try:
+        from database.balance_history_db import get_balance_history
+        history = get_balance_history(
+            login_username,
+            broker=broker,
+            days=days,
+            from_date=from_date,
+            to_date=to_date
+        )
+        return jsonify({"status": "success", "data": history})
+    except Exception as e:
+        logger.exception(f"Error fetching balance history: {e}")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
